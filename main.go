@@ -1,13 +1,29 @@
 package main
 
 import (
-	"net/http"
+	"flag"
+	"strings"
+
+	"github.com/coreos/etcd/raft/raftpb"
+	"github.com/hyperdrive/raft"
+	"github.com/hyperdrive/router"
 )
 
 func main() {
-	http.HandleFunc("/", func(res http.ResponseWriter, req *http.Request) {
-		res.Write([]byte("hello\n"))
-	})
+	cluster := flag.String("cluster", "http://127.0.0.1:8211", "comma separated cluster peers")
 
-	http.ListenAndServe(":8080", nil)
+	id := flag.Int("id", 1, "node ID")
+	port := flag.Int("port", 8311, "key-value server port")
+	join := flag.Bool("join", false, "join an existing cluster")
+	flag.Parse()
+
+	proposeC := make(chan string)
+	defer close(proposeC)
+	confChangeC := make(chan raftpb.ConfChange)
+	defer close(confChangeC)
+
+	router := router.CreateNewRouter()
+	// raft provides a commit stream for the proposals from the http api
+	commitC, errorC, snapshotterReady := raft.NewNode(*id, strings.Split(*cluster, ","), *join, router.CreateSnapshot, proposeC, confChangeC)
+	router.Start(*port, commitC, errorC, snapshotterReady)
 }

@@ -39,3 +39,19 @@ type Resolution struct {
 	Type  ResolutionType
 	Rest  []string
 }
+
+type BitRecord struct {
+	Bitmap uint
+	Offset int
+}
+
+type TableEntry struct {
+	Value   interface{}
+	Subtree *AMTNode
+}
+
+type AMTNode struct {
+	Bitmaps [4]BitRecord
+	Table   []TableEntry
+	Mux     sync.RWMutex
+}
