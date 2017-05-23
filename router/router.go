@@ -1,6 +1,7 @@
 package router
 
 import (
+	"fmt"
 	"net/http"
 
 	"log"
@@ -29,7 +30,7 @@ func (r *Router) Start(port int, commitC <-chan *string, errorC <-chan error, sn
 		res.Write([]byte("hello\n"))
 	})
 
-	http.ListenAndServe(":8080", nil)
+	http.ListenAndServe(fmt.Sprintf(":%d", port), nil)
 }
 
 func readCommits(commitC <-chan *string, errorC <-chan error) {
