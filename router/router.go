@@ -15,6 +15,7 @@ type Router struct {
 	commitC          <-chan *string
 	errorC           <-chan error
 	snapshotterReady <-chan *snap.Snapshotter
+	routeTable       RouteTable
 }
 
 // CreateSnapshot generates a snapshot for recovery.
@@ -22,8 +23,19 @@ func (r *Router) CreateSnapshot() ([]byte, error) {
 	return []byte{}, nil
 }
 
+func invokeFilter(req *http.Request, filter string) {
+}
+
 func (r *Router) handleRoute(res http.ResponseWriter, req *http.Request) {
-	res.Write([]byte("hello\n"))
+	route, ok := r.routeTable.Resolve(req.URL.Path)
+	if !ok {
+		res.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	for _, in := range route.InputFilters {
+		invokeFilter(req, in)
+	}
 }
 
 func (r *Router) handleAPIRoute(res http.ResponseWriter, req *http.Request) {
