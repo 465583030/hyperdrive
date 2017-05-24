@@ -33,31 +33,38 @@ func (r *Router) handleAPIRoute(res http.ResponseWriter, req *http.Request) {
 func (r *Router) startRouterService(port int) {
 	routerService := http.NewServeMux()
 	routerService.HandleFunc("/", r.handleRoute)
-	http.ListenAndServe(fmt.Sprintf(":%d", port), routerService)
+	err := http.ListenAndServe(fmt.Sprintf(":%d", port), routerService)
+	if err != nil {
+		panic(err)
+	}
 }
 
 func (r *Router) startAPIService(port int) {
 	apiService := http.NewServeMux()
 	apiService.HandleFunc("/routes", r.handleAPIRoute)
-	http.ListenAndServe(fmt.Sprintf(":%d", port), apiService)
+	log.Println("a")
+	err := http.ListenAndServe(fmt.Sprintf(":%d", port), apiService)
+	if err != nil {
+		panic(err)
+	}
 }
 
-func (r *Router) readCommits(commitC <-chan *string, errorC <-chan error) {
+func (r *Router) readCommits() {
 	for {
 		select {
-		case data := <-commitC:
+		case data := <-r.commitC:
 			if data != nil {
 				log.Printf(*data)
 			}
-		case <-errorC:
+		case <-r.errorC:
 			break
 		}
 	}
 }
 
 // Start serving routing requests.
-func (r *Router) Start(port int, apiPort int, commitC <-chan *string, errorC <-chan error, snapshotterReady <-chan *snap.Snapshotter) {
-	go r.readCommits(commitC, errorC)
+func (r *Router) Start(port int, apiPort int) {
+	go r.readCommits()
 
 	// TODO: Wait until the node is correctly registered with raft.
 	go r.startAPIService(apiPort)
@@ -65,6 +72,10 @@ func (r *Router) Start(port int, apiPort int, commitC <-chan *string, errorC <-c
 }
 
 // CreateNewRouter creates a new router.
-func CreateNewRouter() *Router {
-	return &Router{}
+func CreateNewRouter(commitC <-chan *string, errorC <-chan error, snapshotterReady <-chan *snap.Snapshotter) *Router {
+	return &Router{
+		commitC:          commitC,
+		errorC:           errorC,
+		snapshotterReady: snapshotterReady,
+	}
 }
