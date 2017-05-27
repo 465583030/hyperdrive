@@ -12,6 +12,7 @@ import (
 // Router is the state of router component.
 type Router struct {
 	port             int
+	apiPort          int
 	commitC          <-chan *string
 	errorC           <-chan error
 	snapshotterReady <-chan *snap.Snapshotter
@@ -42,20 +43,20 @@ func (r *Router) handleAPIRoute(res http.ResponseWriter, req *http.Request) {
 	res.WriteHeader(http.StatusOK)
 }
 
-func (r *Router) startRouterService(port int) {
+func (r *Router) startRouterService() {
 	routerService := http.NewServeMux()
 	routerService.HandleFunc("/", r.handleRoute)
-	err := http.ListenAndServe(fmt.Sprintf(":%d", port), routerService)
+	err := http.ListenAndServe(fmt.Sprintf(":%d", r.port), routerService)
 	if err != nil {
 		panic(err)
 	}
 }
 
-func (r *Router) startAPIService(port int) {
+func (r *Router) startAPIService() {
 	apiService := http.NewServeMux()
 	apiService.HandleFunc("/routes", r.handleAPIRoute)
 	log.Println("a")
-	err := http.ListenAndServe(fmt.Sprintf(":%d", port), apiService)
+	err := http.ListenAndServe(fmt.Sprintf(":%d", r.apiPort), apiService)
 	if err != nil {
 		panic(err)
 	}
@@ -75,19 +76,21 @@ func (r *Router) readCommits() {
 }
 
 // Start serving routing requests.
-func (r *Router) Start(port int, apiPort int) {
+func (r *Router) Start(port int, apiPort int, commitC <-chan *string, errorC <-chan error, snapshotterReady <-chan *snap.Snapshotter) {
+	r.port = port
+	r.apiPort = apiPort
+	r.commitC = commitC
+	r.errorC = errorC
+	r.snapshotterReady = snapshotterReady
+
 	go r.readCommits()
 
 	// TODO: Wait until the node is correctly registered with raft.
-	go r.startAPIService(apiPort)
-	r.startRouterService(port)
+	go r.startAPIService()
+	r.startRouterService()
 }
 
 // CreateNewRouter creates a new router.
-func CreateNewRouter(commitC <-chan *string, errorC <-chan error, snapshotterReady <-chan *snap.Snapshotter) *Router {
-	return &Router{
-		commitC:          commitC,
-		errorC:           errorC,
-		snapshotterReady: snapshotterReady,
-	}
+func CreateNewRouter() *Router {
+	return &Router{}
 }

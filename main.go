@@ -24,7 +24,9 @@ func main() {
 	defer close(confChangeC)
 
 	router := router.CreateNewRouter()
+
 	// raft provides a commit stream for the proposals from the http api
 	commitC, errorC, snapshotterReady := raft.NewNode(*id, strings.Split(*cluster, ","), *join, router.CreateSnapshot, proposeC, confChangeC)
+
 	router.Start(*port, *apiPort, commitC, errorC, snapshotterReady)
 }
