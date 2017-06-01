@@ -1,0 +1,31 @@
+syntax = "proto2";
+package routerpb;
+
+import "gogoproto/gogo.proto";
+
+option (gogoproto.marshaler_all) = true;
+option (gogoproto.sizer_all) = true;
+option (gogoproto.unmarshaler_all) = true;
+option (gogoproto.goproto_getters_all) = false;
+option (gogoproto.goproto_enum_prefix_all) = false;
+
+message Route {
+  optional string path              = 1;
+  optional string route             = 2;
+  repeated string preprocessors     = 3;
+  repeated string postprocessors    = 4;
+}
+
+message RemoveRouteRequest {
+  optional string path              = 1;
+}
+
+enum MessageType {
+	MsgAddRoute                       = 0;
+  MsgRemoveRoute                    = 1;
+}
+
+message Message {
+	optional MessageType type         = 1  [(gogoproto.nullable) = false];
+  optional Route route              = 2  [(gogoproto.nullable) = true];
+}
