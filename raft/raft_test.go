@@ -24,9 +24,9 @@ import (
 
 type cluster struct {
 	peers       []string
-	commitC     []<-chan *string
+	commitC     []<-chan []byte
 	errorC      []<-chan error
-	proposeC    []chan string
+	proposeC    []chan []byte
 	confChangeC []chan raftpb.ConfChange
 }
 
@@ -39,16 +39,16 @@ func newCluster(n int) *cluster {
 
 	clus := &cluster{
 		peers:       peers,
-		commitC:     make([]<-chan *string, len(peers)),
+		commitC:     make([]<-chan []byte, len(peers)),
 		errorC:      make([]<-chan error, len(peers)),
-		proposeC:    make([]chan string, len(peers)),
+		proposeC:    make([]chan []byte, len(peers)),
 		confChangeC: make([]chan raftpb.ConfChange, len(peers)),
 	}
 
 	for i := range clus.peers {
 		os.RemoveAll(fmt.Sprintf("hyperdrive-%d", i+1))
 		os.RemoveAll(fmt.Sprintf("hyperdrive-%d-snap", i+1))
-		clus.proposeC[i] = make(chan string, 1)
+		clus.proposeC[i] = make(chan []byte, 1)
 		clus.confChangeC[i] = make(chan raftpb.ConfChange, 1)
 		clus.commitC[i], clus.errorC[i], _ = NewNode(i+1, clus.peers, false, nil, clus.proposeC[i], clus.confChangeC[i])
 	}
@@ -102,14 +102,14 @@ func TestProposeOnCommit(t *testing.T) {
 	donec := make(chan struct{})
 	for i := range clus.peers {
 		// feedback for "n" committed entries, then update donec
-		go func(pC chan<- string, cC <-chan *string, eC <-chan error) {
+		go func(pC chan<- []byte, cC <-chan []byte, eC <-chan error) {
 			for n := 0; n < 100; n++ {
 				s, ok := <-cC
 				if !ok {
 					pC = nil
 				}
 				select {
-				case pC <- *s:
+				case pC <- s:
 					continue
 				case err := <-eC:
 					t.Fatalf("eC message (%v)", err)
@@ -123,7 +123,7 @@ func TestProposeOnCommit(t *testing.T) {
 		}(clus.proposeC[i], clus.commitC[i], clus.errorC[i])
 
 		// one message feedback per node
-		go func(i int) { clus.proposeC[i] <- "foo" }(i)
+		go func(i int) { clus.proposeC[i] <- []byte("foo") }(i)
 	}
 
 	for range clus.peers {
@@ -148,12 +148,12 @@ func TestCloseProposerInflight(t *testing.T) {
 
 	// some inflight ops
 	go func() {
-		clus.proposeC[0] <- "foo"
-		clus.proposeC[0] <- "bar"
+		clus.proposeC[0] <- []byte("foo")
+		clus.proposeC[0] <- []byte("bar")
 	}()
 
 	// wait for one message
-	if c, ok := <-clus.commitC[0]; *c != "foo" || !ok {
+	if c, ok := <-clus.commitC[0]; string(c) != "foo" || !ok {
 		t.Fatalf("Commit failed")
 	}
 }

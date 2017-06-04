@@ -38,9 +38,9 @@ import (
 
 // Node is the state of each raft peer.
 type Node struct {
-	proposeC    <-chan string            // proposed messages (k,v)
+	proposeC    <-chan []byte            // proposed messages
 	confChangeC <-chan raftpb.ConfChange // proposed cluster config changes
-	commitC     chan<- *string           // entries committed to log (k,v)
+	commitC     chan<- []byte            // entries committed to log (k,v)
 	errorC      chan<- error             // errors from raft session
 
 	id          int      // client ID for raft session
@@ -77,10 +77,13 @@ var defaultSnapCount uint64 = 10000
 // provided the proposal channel. All log entries are replayed over the
 // commit channel, followed by a nil message (to indicate the channel is
 // current), then new log entries. To shutdown, close proposeC and read errorC.
-func NewNode(id int, peers []string, join bool, getSnapshot func() ([]byte, error), proposeC <-chan string,
-	confChangeC <-chan raftpb.ConfChange) (<-chan *string, <-chan error, <-chan *snap.Snapshotter) {
+func NewNode(id int, peers []string, join bool,
+	getSnapshot func() ([]byte, error),
+	proposeC <-chan []byte,
+	confChangeC <-chan raftpb.ConfChange) (
+	<-chan []byte, <-chan error, <-chan *snap.Snapshotter) {
 
-	commitC := make(chan *string)
+	commitC := make(chan []byte)
 	errorC := make(chan error)
 
 	rc := &Node{
@@ -144,9 +147,8 @@ func (rc *Node) publishEntries(ents []raftpb.Entry) bool {
 				// ignore empty messages
 				break
 			}
-			s := string(ents[i].Data)
 			select {
-			case rc.commitC <- &s:
+			case rc.commitC <- ents[i].Data:
 			case <-rc.stopc:
 				return false
 			}
@@ -393,7 +395,7 @@ func (rc *Node) serveChannels() {
 
 	// send proposals over raft
 	go func() {
-		var confChangeCount uint64 = 0
+		var confChangeCount uint64
 
 		for rc.proposeC != nil && rc.confChangeC != nil {
 			select {
@@ -402,14 +404,14 @@ func (rc *Node) serveChannels() {
 					rc.proposeC = nil
 				} else {
 					// blocks until accepted by raft state machine
-					rc.node.Propose(context.TODO(), []byte(prop))
+					rc.node.Propose(context.TODO(), prop)
 				}
 
 			case cc, ok := <-rc.confChangeC:
 				if !ok {
 					rc.confChangeC = nil
 				} else {
-					confChangeCount += 1
+					confChangeCount++
 					cc.ID = confChangeCount
 					rc.node.ProposeConfChange(context.TODO(), cc)
 				}
