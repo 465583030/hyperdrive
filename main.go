@@ -24,8 +24,6 @@ func main() {
 	defer close(confChangeC)
 	snapshotC := make(chan chan<- []byte)
 
-	router := router.CreateNewRouter()
-
 	node := raft.NewNode(*id,
 		strings.Split(*cluster, ","),
 		*join,
@@ -33,5 +31,5 @@ func main() {
 		proposeC,
 		confChangeC)
 
-	router.Start(*port, *apiPort, node, snapshotC)
+	router.NewRouter(*port, *apiPort, node, snapshotC)
 }

@@ -14,6 +14,7 @@ type Router struct {
 	port       int
 	apiPort    int
 	node       *raft.Node
+	snapshotC  <-chan chan<- []byte
 	routeTable RouteTable
 }
 
@@ -73,20 +74,18 @@ func (r *Router) readCommits() {
 	}
 }
 
-// Start serving routing requests.
-func (r *Router) Start(port int, apiPort int, node *raft.Node, snapshotC <-chan chan<- []byte) {
-	r.port = port
-	r.apiPort = apiPort
-	r.node = node
+// NewRouter starts the routing module.
+func NewRouter(port int, apiPort int, node *raft.Node, snapshotC <-chan chan<- []byte) {
+	r := &Router{
+		port:      port,
+		apiPort:   apiPort,
+		node:      node,
+		snapshotC: snapshotC,
+	}
 
 	go r.readCommits()
 
 	// TODO: Wait until the node is correctly registered with raft.
 	go r.startAPIService()
 	r.startRouterService()
-}
-
-// CreateNewRouter creates a new router.
-func CreateNewRouter() *Router {
-	return &Router{}
 }
