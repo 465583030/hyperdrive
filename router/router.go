@@ -1,6 +1,7 @@
 package router
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 
@@ -75,7 +76,12 @@ func (r *Router) readCommits() {
 }
 
 // NewRouter starts the routing module.
-func NewRouter(port int, apiPort int, node *raft.Node, snapshotC <-chan chan<- []byte) {
+func NewRouter(ctx context.Context,
+	port int,
+	apiPort int,
+	node *raft.Node,
+	snapshotC <-chan chan<- []byte) {
+
 	r := &Router{
 		port:      port,
 		apiPort:   apiPort,

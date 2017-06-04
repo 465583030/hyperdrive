@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"strings"
 
@@ -31,5 +32,5 @@ func main() {
 		proposeC,
 		confChangeC)
 
-	router.NewRouter(*port, *apiPort, node, snapshotC)
+	router.NewRouter(context.TODO(), *port, *apiPort, node, snapshotC)
 }
