@@ -22,11 +22,16 @@ func main() {
 	defer close(proposeC)
 	confChangeC := make(chan raftpb.ConfChange)
 	defer close(confChangeC)
+	snapshotC := make(chan chan<- []byte)
 
 	router := router.CreateNewRouter()
 
-	// raft provides a commit stream for the proposals from the http api
-	commitC, errorC, snapshotterReady := raft.NewNode(*id, strings.Split(*cluster, ","), *join, router.CreateSnapshot, proposeC, confChangeC)
+	node := raft.NewNode(*id,
+		strings.Split(*cluster, ","),
+		*join,
+		snapshotC,
+		proposeC,
+		confChangeC)
 
-	router.Start(*port, *apiPort, commitC, errorC, snapshotterReady)
+	router.Start(*port, *apiPort, node, snapshotC)
 }

@@ -40,16 +40,16 @@ import (
 type Node struct {
 	proposeC    <-chan []byte            // proposed messages
 	confChangeC <-chan raftpb.ConfChange // proposed cluster config changes
-	commitC     chan<- []byte            // entries committed to log (k,v)
-	errorC      chan<- error             // errors from raft session
+	snapshotC   chan<- chan<- []byte
+	commitC     chan []byte // entries committed to log (k,v)
+	errorC      chan error  // errors from raft session
 
-	id          int      // client ID for raft session
-	peers       []string // raft peer URLs
-	join        bool     // node is joining an existing cluster
-	waldir      string   // path to WAL directory
-	snapdir     string   // path to snapshot directory
-	getSnapshot func() ([]byte, error)
-	lastIndex   uint64 // index of log at start
+	id        int      // client ID for raft session
+	peers     []string // raft peer URLs
+	join      bool     // node is joining an existing cluster
+	waldir    string   // path to WAL directory
+	snapdir   string   // path to snapshot directory
+	lastIndex uint64   // index of log at start
 
 	confState     raftpb.ConfState
 	snapshotIndex uint64
@@ -77,11 +77,12 @@ var defaultSnapCount uint64 = 10000
 // provided the proposal channel. All log entries are replayed over the
 // commit channel, followed by a nil message (to indicate the channel is
 // current), then new log entries. To shutdown, close proposeC and read errorC.
-func NewNode(id int, peers []string, join bool,
-	getSnapshot func() ([]byte, error),
+func NewNode(id int,
+	peers []string,
+	join bool,
+	snapshotC chan<- chan<- []byte,
 	proposeC <-chan []byte,
-	confChangeC <-chan raftpb.ConfChange) (
-	<-chan []byte, <-chan error, <-chan *snap.Snapshotter) {
+	confChangeC <-chan raftpb.ConfChange) *Node {
 
 	commitC := make(chan []byte)
 	errorC := make(chan error)
@@ -91,12 +92,12 @@ func NewNode(id int, peers []string, join bool,
 		confChangeC: confChangeC,
 		commitC:     commitC,
 		errorC:      errorC,
+		snapshotC:   snapshotC,
 		id:          id,
 		peers:       peers,
 		join:        join,
 		waldir:      fmt.Sprintf("hyperdrive-%d", id),
 		snapdir:     fmt.Sprintf("hyperdrive-%d-snap", id),
-		getSnapshot: getSnapshot,
 		snapCount:   defaultSnapCount,
 		stopc:       make(chan struct{}),
 		httpstopc:   make(chan struct{}),
@@ -106,7 +107,7 @@ func NewNode(id int, peers []string, join bool,
 		// rest of structure populated after WAL replay
 	}
 	go rc.startRaft()
-	return commitC, errorC, rc.snapshotterReady
+	return rc
 }
 
 func (rc *Node) saveSnap(snap raftpb.Snapshot) error {
@@ -355,11 +356,13 @@ func (rc *Node) maybeTriggerSnapshot() {
 	}
 
 	log.Printf("start snapshot [applied index: %d | last snapshot index: %d]", rc.appliedIndex, rc.snapshotIndex)
-	data, err := rc.getSnapshot()
-	if err != nil {
-		log.Panic(err)
+	snapshot := make(chan []byte)
+	rc.snapshotC <- snapshot
+	s, ok := <-snapshot
+	if !ok {
+		log.Panic()
 	}
-	snap, err := rc.raftStorage.CreateSnapshot(rc.appliedIndex, &rc.confState, data)
+	snap, err := rc.raftStorage.CreateSnapshot(rc.appliedIndex, &rc.confState, s)
 	if err != nil {
 		panic(err)
 	}
@@ -481,3 +484,15 @@ func (rc *Node) Process(ctx context.Context, m raftpb.Message) error {
 func (rc *Node) IsIDRemoved(id uint64) bool                           { return false }
 func (rc *Node) ReportUnreachable(id uint64)                          {}
 func (rc *Node) ReportSnapshot(id uint64, status raft.SnapshotStatus) {}
+
+func (rc *Node) Commits() <-chan []byte {
+	return rc.commitC
+}
+
+func (rc *Node) Errors() <-chan error {
+	return rc.errorC
+}
+
+func (rc *Node) SnapshotterReader() <-chan *snap.Snapshotter {
+	return rc.snapshotterReady
+}

@@ -6,17 +6,15 @@ import (
 
 	"log"
 
-	"github.com/coreos/etcd/snap"
+	"github.com/hyperdrive/raft"
 )
 
 // Router is the state of router component.
 type Router struct {
-	port             int
-	apiPort          int
-	commitC          <-chan *string
-	errorC           <-chan error
-	snapshotterReady <-chan *snap.Snapshotter
-	routeTable       RouteTable
+	port       int
+	apiPort    int
+	node       *raft.Node
+	routeTable RouteTable
 }
 
 // CreateSnapshot generates a snapshot for recovery.
@@ -65,23 +63,21 @@ func (r *Router) startAPIService() {
 func (r *Router) readCommits() {
 	for {
 		select {
-		case data := <-r.commitC:
+		case data := <-r.node.Commits():
 			if data != nil {
-				log.Printf(*data)
+				log.Printf(string(data))
 			}
-		case <-r.errorC:
+		case <-r.node.Errors():
 			break
 		}
 	}
 }
 
 // Start serving routing requests.
-func (r *Router) Start(port int, apiPort int, commitC <-chan *string, errorC <-chan error, snapshotterReady <-chan *snap.Snapshotter) {
+func (r *Router) Start(port int, apiPort int, node *raft.Node, snapshotC <-chan chan<- []byte) {
 	r.port = port
 	r.apiPort = apiPort
-	r.commitC = commitC
-	r.errorC = errorC
-	r.snapshotterReady = snapshotterReady
+	r.node = node
 
 	go r.readCommits()
 
