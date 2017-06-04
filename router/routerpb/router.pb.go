@@ -17,7 +17,6 @@ package routerpb
 import proto "github.com/golang/protobuf/proto"
 import fmt "fmt"
 import math "math"
-import _ "gogoproto"
 
 import io "io"
 
