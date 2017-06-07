@@ -9,7 +9,7 @@ option (gogoproto.unmarshaler_all) = true;
 option (gogoproto.goproto_getters_all) = false;
 option (gogoproto.goproto_enum_prefix_all) = false;
 
-message Route {
+message AddRouteRequest {
   optional string path              = 1;
   optional string route             = 2;
   repeated string preprocessors     = 3;
@@ -26,6 +26,7 @@ enum MessageType {
 }
 
 message Message {
-	optional MessageType type         = 1  [(gogoproto.nullable) = false];
-  optional Route route              = 2  [(gogoproto.nullable) = true];
+	optional MessageType type                     = 1  [(gogoproto.nullable) = false];
+  optional AddRouteRequest addRoute             = 2  [(gogoproto.nullable) = true];
+  optional RemoveRouteRequest removeRoute       = 3  [(gogoproto.nullable) = true];
 }
