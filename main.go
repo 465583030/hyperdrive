@@ -8,6 +8,7 @@ import (
 	"github.com/coreos/etcd/raft/raftpb"
 	"github.com/hyperdrive/raft"
 	"github.com/hyperdrive/router"
+	"github.com/sirupsen/logrus"
 )
 
 func main() {
@@ -32,5 +33,6 @@ func main() {
 		proposeC,
 		confChangeC)
 
-	router.NewRouter(context.TODO(), *port, *apiPort, node, snapshotC)
+	logger := &logrus.Logger{}
+	router.NewRouter(context.TODO(), *port, *apiPort, node, snapshotC, logger)
 }
