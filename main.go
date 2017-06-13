@@ -34,5 +34,6 @@ func main() {
 		confChangeC)
 
 	logger := &logrus.Logger{}
-	router.NewRouter(context.TODO(), *port, *apiPort, node, snapshotC, logger)
+	router.NewRouter(context.TODO(),
+		*port, *apiPort, node, proposeC, snapshotC, logger)
 }

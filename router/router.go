@@ -10,8 +10,39 @@ import (
 	"sync"
 
 	"github.com/hyperdrive/raft"
+	"github.com/hyperdrive/router/routerpb"
 	"github.com/sirupsen/logrus"
 )
+
+// Route holds the a single route table entry.
+type Route struct {
+	Destination   string
+	InputFilters  []string
+	OutputFilters []string
+}
+
+// RouteTable is the interface to various route table implementations.
+type RouteTable interface {
+	Add(source string, route *Route)
+	Delete(source string)
+	Resolve(source string) (*Route, bool)
+}
+
+const (
+	msgProposeRoute = iota
+	msgAddRoute
+	msgRemoveRoute
+	msgSnapshot
+)
+
+type msgType uint
+
+type message struct {
+	Type               msgType
+	ReplyTo            chan<- interface{}
+	AddRouteRequest    routerpb.AddRouteRequest
+	RemoveRouteRequest routerpb.RemoveRouteRequest
+}
 
 // Node is the external view of a router node.
 type Node struct {
@@ -84,8 +115,13 @@ func (r *Router) readCommits() {
 	}
 }
 
-func handleMessage(msg *message) {
+func handleMessage(msg *message, proposeC chan<- []byte) {
+	// pending := map[string]*message{}
+	var msgID uint64
+
 	switch msg.Type {
+	case msgProposeRoute:
+		msgID++
 	case msgAddRoute:
 		// TODO add route implementation
 	case msgRemoveRoute:
@@ -95,14 +131,16 @@ func handleMessage(msg *message) {
 	}
 }
 
-func (n *Node) routerEventLoop(ctx context.Context, input <-chan *message) {
+func (n *Node) routerEventLoop(ctx context.Context,
+	input <-chan *message,
+	proposeC chan<- []byte) {
 	defer n.waitGroup.Done()
 	done := false
 
 	for !done {
 		select {
 		case e := <-input:
-			handleMessage(e)
+			handleMessage(e, proposeC)
 		case <-ctx.Done():
 			n.log.Error("hyperdrive: Router event loop stopped. ", ctx.Err())
 			done = true
@@ -143,7 +181,8 @@ func (n *Node) WaitForExit() {
 func NewRouter(ctx context.Context,
 	port int,
 	apiPort int,
-	node *raft.Node,
+	raftNode *raft.Node,
+	proposeC chan<- []byte,
 	snapshotC <-chan chan<- []byte,
 	logger *logrus.Logger) *Node {
 
@@ -158,7 +197,7 @@ func NewRouter(ctx context.Context,
 
 	routerC := make(chan *message)
 
-	go n.routerEventLoop(ctx, routerC)
+	go n.routerEventLoop(ctx, routerC, proposeC)
 	go n.snapshotterEventLoop(ctx, routerC, snapshotC)
 	// go r.readCommits()
 

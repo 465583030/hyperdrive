@@ -27,6 +27,7 @@ enum MessageType {
 
 message Message {
 	optional MessageType type                     = 1  [(gogoproto.nullable) = false];
-  optional AddRouteRequest addRoute             = 2  [(gogoproto.nullable) = true];
-  optional RemoveRouteRequest removeRoute       = 3  [(gogoproto.nullable) = true];
+  optional string ProposalID                    = 2  [(gogoproto.nullable) = false];
+  optional AddRouteRequest addRoute             = 3  [(gogoproto.nullable) = true];
+  optional RemoveRouteRequest removeRoute       = 4  [(gogoproto.nullable) = true];
 }
