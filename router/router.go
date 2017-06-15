@@ -29,9 +29,9 @@ type RouteTable interface {
 }
 
 const (
-	msgProposeRoute = iota
-	msgAddRoute
-	msgRemoveRoute
+	msgProposeAddRoute = iota
+	msgProposeRemoveRoute
+	msgCommit
 	msgSnapshot
 )
 
@@ -40,8 +40,9 @@ type msgType uint
 type message struct {
 	Type               msgType
 	ReplyTo            chan<- interface{}
-	AddRouteRequest    routerpb.AddRouteRequest
-	RemoveRouteRequest routerpb.RemoveRouteRequest
+	AddRouteRequest    *routerpb.AddRouteRequest
+	RemoveRouteRequest *routerpb.RemoveRouteRequest
+	Message            *routerpb.Message
 }
 
 // Node is the external view of a router node.
@@ -52,6 +53,7 @@ type Node struct {
 
 // Router is the state of router component.
 type Router struct {
+	id         string
 	port       int
 	apiPort    int
 	node       *raft.Node
@@ -115,17 +117,55 @@ func (r *Router) readCommits() {
 	}
 }
 
-func handleMessage(msg *message, proposeC chan<- []byte) {
-	// pending := map[string]*message{}
+func (r *Router) handleMessage(msg *message, proposeC chan<- []byte) {
+	pending := map[string]*message{}
 	var msgID uint64
 
 	switch msg.Type {
-	case msgProposeRoute:
+	case msgProposeAddRoute:
 		msgID++
-	case msgAddRoute:
-		// TODO add route implementation
-	case msgRemoveRoute:
-		// TODO remove route implemetation
+		pmsg := &routerpb.Message{
+			Type:       routerpb.MsgAddRoute,
+			ProposalID: fmt.Sprintf("%s-%d", r.id, msgID),
+			AddRoute:   msg.AddRouteRequest,
+		}
+		go func() {
+			payload, err := pmsg.Marshal()
+			// (buddyspike) What do we do with err?
+			if err == nil {
+				proposeC <- payload
+			}
+		}()
+	case msgProposeRemoveRoute:
+		pmsg := &routerpb.Message{
+			Type:       routerpb.MsgRemoveRoute,
+			ProposalID: fmt.Sprintf("%s-%d", r.id, msgID),
+			AddRoute:   msg.AddRouteRequest,
+		}
+		go func() {
+			payload, err := pmsg.Marshal()
+			// (buddyspike) What do we do with err?
+			if err == nil {
+				proposeC <- payload
+			}
+		}()
+	case msgCommit:
+		pmsg := msg.Message
+		switch pmsg.Type {
+		case routerpb.MsgAddRoute:
+			r.routeTable.Add(*pmsg.AddRoute.Path, &Route{
+				Destination:   *pmsg.AddRoute.Route,
+				InputFilters:  pmsg.AddRoute.Preprocessors,
+				OutputFilters: pmsg.AddRoute.Postprocessors,
+			})
+		}
+		// delete the item from map if it was proposed by this node.
+		// also notify the waiters.
+		if input, ok := pending[pmsg.ProposalID]; ok {
+			delete(pending, pmsg.ProposalID)
+			input.ReplyTo <- true
+		}
+
 	case msgSnapshot:
 		msg.ReplyTo <- []byte{}
 	}
