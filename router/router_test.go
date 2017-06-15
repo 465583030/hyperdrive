@@ -18,7 +18,7 @@ type testRouterContext struct {
 	snapshotC chan chan<- []byte
 }
 
-func newTestRouter(ctx context.Context) (*Node, *testRouterContext) {
+func newTestRouter(ctx context.Context) (*Router, *testRouterContext) {
 	if ctx == nil {
 		ctx = context.TODO()
 	}
@@ -33,10 +33,10 @@ func newTestRouter(ctx context.Context) (*Node, *testRouterContext) {
 		snapshotC: make(chan chan<- []byte),
 	}
 
-	node := NewRouter(testContext.context,
+	router := NewRouter(testContext.context,
 		80, 81, nil, testContext.proposeC, testContext.snapshotC, testContext.logger)
 
-	return node, testContext
+	return router, testContext
 }
 
 func TestResponseToSnapshotRequests(t *testing.T) {

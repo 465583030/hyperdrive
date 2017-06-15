@@ -45,12 +45,6 @@ type message struct {
 	Message            *routerpb.Message
 }
 
-// Node is the external view of a router node.
-type Node struct {
-	log       *logrus.Logger
-	waitGroup *sync.WaitGroup
-}
-
 // Router is the state of router component.
 type Router struct {
 	id         string
@@ -59,6 +53,8 @@ type Router struct {
 	node       *raft.Node
 	snapshotC  <-chan chan<- []byte
 	routeTable RouteTable
+	log        *logrus.Logger
+	waitGroup  *sync.WaitGroup
 }
 
 // CreateSnapshot generates a snapshot for recovery.
@@ -122,29 +118,26 @@ func (r *Router) handleMessage(msg *message, proposeC chan<- []byte) {
 	var msgID uint64
 
 	switch msg.Type {
-	case msgProposeAddRoute:
+	case msgProposeAddRoute, msgProposeRemoveRoute:
 		msgID++
 		pmsg := &routerpb.Message{
-			Type:       routerpb.MsgAddRoute,
 			ProposalID: fmt.Sprintf("%s-%d", r.id, msgID),
-			AddRoute:   msg.AddRouteRequest,
 		}
+
+		switch msg.Type {
+		case msgProposeAddRoute:
+			pmsg.Type = routerpb.MsgAddRoute
+			pmsg.AddRoute = msg.AddRouteRequest
+		case msgProposeRemoveRoute:
+			pmsg.Type = routerpb.MsgRemoveRoute
+			pmsg.RemoveRoute = msg.RemoveRouteRequest
+		}
+
+		pending[pmsg.ProposalID] = msg
+
 		go func() {
 			payload, err := pmsg.Marshal()
-			// (buddyspike) What do we do with err?
-			if err == nil {
-				proposeC <- payload
-			}
-		}()
-	case msgProposeRemoveRoute:
-		pmsg := &routerpb.Message{
-			Type:       routerpb.MsgRemoveRoute,
-			ProposalID: fmt.Sprintf("%s-%d", r.id, msgID),
-			AddRoute:   msg.AddRouteRequest,
-		}
-		go func() {
-			payload, err := pmsg.Marshal()
-			// (buddyspike) What do we do with err?
+			// (buddyspike) what do we do with err?
 			if err == nil {
 				proposeC <- payload
 			}
@@ -171,28 +164,28 @@ func (r *Router) handleMessage(msg *message, proposeC chan<- []byte) {
 	}
 }
 
-func (n *Node) routerEventLoop(ctx context.Context,
+func (r *Router) routerEventLoop(ctx context.Context,
 	input <-chan *message,
 	proposeC chan<- []byte) {
-	defer n.waitGroup.Done()
+	defer r.waitGroup.Done()
 	done := false
 
 	for !done {
 		select {
 		case e := <-input:
-			handleMessage(e, proposeC)
+			r.handleMessage(e, proposeC)
 		case <-ctx.Done():
-			n.log.Error("hyperdrive: Router event loop stopped. ", ctx.Err())
+			r.log.Error("hyperdrive: Router event loop stopped. ", ctx.Err())
 			done = true
 		}
 	}
 }
 
-func (n *Node) snapshotterEventLoop(ctx context.Context,
+func (r *Router) snapshotterEventLoop(ctx context.Context,
 	routerC chan<- *message,
 	snapshotC <-chan chan<- []byte) {
 
-	defer n.waitGroup.Done()
+	defer r.waitGroup.Done()
 	done := false
 
 	for !done {
@@ -206,15 +199,15 @@ func (n *Node) snapshotterEventLoop(ctx context.Context,
 			routerC <- m
 			s <- (<-resC).([]byte)
 		case <-ctx.Done():
-			n.log.Error("hyperdrive: Snapshotter event loop is stopped. ", ctx.Err())
+			r.log.Error("hyperdrive: Snapshotter event loop is stopped. ", ctx.Err())
 			done = true
 		}
 	}
 }
 
 // WaitForExit waits until all goroutines of the router returns.
-func (n *Node) WaitForExit() {
-	n.waitGroup.Wait()
+func (r *Router) WaitForExit() {
+	r.waitGroup.Wait()
 }
 
 // NewRouter starts the routing module.
@@ -224,11 +217,14 @@ func NewRouter(ctx context.Context,
 	raftNode *raft.Node,
 	proposeC chan<- []byte,
 	snapshotC <-chan chan<- []byte,
-	logger *logrus.Logger) *Node {
+	logger *logrus.Logger) *Router {
 
 	wg := &sync.WaitGroup{}
 
-	n := &Node{
+	n := &Router{
+		port:      port,
+		apiPort:   apiPort,
+		snapshotC: snapshotC,
 		log:       logger,
 		waitGroup: wg,
 	}
