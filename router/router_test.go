@@ -66,7 +66,7 @@ func TestLoggingWhenExitingEventLoop(t *testing.T) {
 	cancel()
 	n.WaitForExit()
 
-	assert.Equal(t, 2, len(tc.hook.Entries))
+	assert.Equal(t, 3, len(tc.hook.Entries))
 	for _, e := range tc.hook.Entries {
 		assert.Equal(t, logrus.ErrorLevel, e.Level)
 	}

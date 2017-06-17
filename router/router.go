@@ -47,14 +47,15 @@ type message struct {
 
 // Router is the state of router component.
 type Router struct {
-	id         string
-	port       int
-	apiPort    int
-	node       *raft.Node
-	snapshotC  <-chan chan<- []byte
-	routeTable RouteTable
-	log        *logrus.Logger
-	waitGroup  *sync.WaitGroup
+	id                  string
+	port                int
+	apiPort             int
+	node                *raft.Node
+	snapshotC           <-chan chan<- []byte
+	routeTable          RouteTable
+	log                 *logrus.Logger
+	eventLoopsWaitGroup *sync.WaitGroup
+	routerWaitGroup     *sync.WaitGroup
 }
 
 // CreateSnapshot generates a snapshot for recovery.
@@ -167,7 +168,7 @@ func (r *Router) handleMessage(msg *message, proposeC chan<- []byte) {
 func (r *Router) routerEventLoop(ctx context.Context,
 	input <-chan *message,
 	proposeC chan<- []byte) {
-	defer r.waitGroup.Done()
+	defer r.eventLoopsWaitGroup.Done()
 	done := false
 
 	for !done {
@@ -185,7 +186,7 @@ func (r *Router) snapshotterEventLoop(ctx context.Context,
 	routerC chan<- *message,
 	snapshotC <-chan chan<- []byte) {
 
-	defer r.waitGroup.Done()
+	defer r.eventLoopsWaitGroup.Done()
 	done := false
 
 	for !done {
@@ -205,12 +206,23 @@ func (r *Router) snapshotterEventLoop(ctx context.Context,
 	}
 }
 
+func (r *Router) closeRouterC(routerC chan *message) {
+	defer r.routerWaitGroup.Done()
+
+	r.eventLoopsWaitGroup.Wait()
+	close(routerC)
+	r.log.Error("hyperdrive: Router internal event loop channel closed.")
+}
+
 // WaitForExit waits until all goroutines of the router returns.
 func (r *Router) WaitForExit() {
-	r.waitGroup.Wait()
+	r.routerWaitGroup.Wait()
 }
 
 // NewRouter starts the routing module.
+// Close ctx to notify the clean-up.
+// Closing of proposeC and snapshotC should be done after
+// WaitForExit returns.
 func NewRouter(ctx context.Context,
 	port int,
 	apiPort int,
@@ -219,22 +231,26 @@ func NewRouter(ctx context.Context,
 	snapshotC <-chan chan<- []byte,
 	logger *logrus.Logger) *Router {
 
-	wg := &sync.WaitGroup{}
+	eventLoopsWaitGroup := &sync.WaitGroup{}
+	routerWaitGroup := &sync.WaitGroup{}
 
 	n := &Router{
-		port:      port,
-		apiPort:   apiPort,
-		snapshotC: snapshotC,
-		log:       logger,
-		waitGroup: wg,
+		port:                port,
+		apiPort:             apiPort,
+		snapshotC:           snapshotC,
+		log:                 logger,
+		eventLoopsWaitGroup: eventLoopsWaitGroup,
+		routerWaitGroup:     routerWaitGroup,
 	}
 
-	wg.Add(2)
+	routerWaitGroup.Add(1)
+	eventLoopsWaitGroup.Add(2)
 
 	routerC := make(chan *message)
 
 	go n.routerEventLoop(ctx, routerC, proposeC)
 	go n.snapshotterEventLoop(ctx, routerC, snapshotC)
+	go n.closeRouterC(routerC)
 	// go r.readCommits()
 
 	// TODO: Wait until the node is correctly registered with raft.
