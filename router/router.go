@@ -58,11 +58,6 @@ type Router struct {
 	routerWaitGroup     *sync.WaitGroup
 }
 
-// CreateSnapshot generates a snapshot for recovery.
-func (r *Router) CreateSnapshot() ([]byte, error) {
-	return []byte{}, nil
-}
-
 func invokeFilter(req *http.Request, filter string) {
 }
 
@@ -134,6 +129,7 @@ func (r *Router) handleMessage(msg *message, proposeC chan<- []byte) {
 			pmsg.RemoveRoute = msg.RemoveRouteRequest
 		}
 
+		r.log.Debugf("hyperdrive: Proposal %s sent", pmsg.ProposalID)
 		pending[pmsg.ProposalID] = msg
 
 		go func() {
@@ -156,6 +152,7 @@ func (r *Router) handleMessage(msg *message, proposeC chan<- []byte) {
 		// delete the item from map if it was proposed by this node.
 		// also notify the waiters.
 		if input, ok := pending[pmsg.ProposalID]; ok {
+			r.log.Debugf("hyperdrive: Proposal %s is committed", pmsg.ProposalID)
 			delete(pending, pmsg.ProposalID)
 			input.ReplyTo <- true
 		}
@@ -212,6 +209,11 @@ func (r *Router) closeRouterC(routerC chan *message) {
 	r.eventLoopsWaitGroup.Wait()
 	close(routerC)
 	r.log.Error("hyperdrive: Router internal event loop channel closed.")
+}
+
+// CreateSnapshot generates a snapshot for recovery.
+func (r *Router) CreateSnapshot() ([]byte, error) {
+	return []byte{}, nil
 }
 
 // WaitForExit waits until all goroutines of the router returns.
