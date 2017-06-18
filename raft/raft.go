@@ -41,8 +41,8 @@ type Node struct {
 	proposeC    <-chan []byte            // proposed messages
 	confChangeC <-chan raftpb.ConfChange // proposed cluster config changes
 	snapshotC   chan<- chan<- []byte
-	commitC     chan []byte // entries committed to log (k,v)
-	errorC      chan error  // errors from raft session
+	commitC     chan<- []byte // entries committed to log (k,v)
+	errorC      chan<- error  // errors from raft session
 
 	id        int      // client ID for raft session
 	peers     []string // raft peer URLs
@@ -82,10 +82,9 @@ func NewNode(id int,
 	join bool,
 	snapshotC chan<- chan<- []byte,
 	proposeC <-chan []byte,
+	commitC chan<- []byte,
+	errorC chan<- error,
 	confChangeC <-chan raftpb.ConfChange) *Node {
-
-	commitC := make(chan []byte)
-	errorC := make(chan error)
 
 	rc := &Node{
 		proposeC:    proposeC,
@@ -108,6 +107,17 @@ func NewNode(id int,
 	}
 	go rc.startRaft()
 	return rc
+}
+
+func (rc *Node) Process(ctx context.Context, m raftpb.Message) error {
+	return rc.node.Step(ctx, m)
+}
+func (rc *Node) IsIDRemoved(id uint64) bool                           { return false }
+func (rc *Node) ReportUnreachable(id uint64)                          {}
+func (rc *Node) ReportSnapshot(id uint64, status raft.SnapshotStatus) {}
+
+func (rc *Node) SnapshotterReader() <-chan *snap.Snapshotter {
+	return rc.snapshotterReady
 }
 
 func (rc *Node) saveSnap(snap raftpb.Snapshot) error {
@@ -476,23 +486,4 @@ func (rc *Node) serveRaft() {
 		log.Fatalf("hyperdrive: Failed to serve rafthttp (%v)", err)
 	}
 	close(rc.httpdonec)
-}
-
-func (rc *Node) Process(ctx context.Context, m raftpb.Message) error {
-	return rc.node.Step(ctx, m)
-}
-func (rc *Node) IsIDRemoved(id uint64) bool                           { return false }
-func (rc *Node) ReportUnreachable(id uint64)                          {}
-func (rc *Node) ReportSnapshot(id uint64, status raft.SnapshotStatus) {}
-
-func (rc *Node) Commits() <-chan []byte {
-	return rc.commitC
-}
-
-func (rc *Node) Errors() <-chan error {
-	return rc.errorC
-}
-
-func (rc *Node) SnapshotterReader() <-chan *snap.Snapshotter {
-	return rc.snapshotterReady
 }

@@ -25,15 +25,28 @@ func main() {
 	confChangeC := make(chan raftpb.ConfChange)
 	defer close(confChangeC)
 	snapshotC := make(chan chan<- []byte)
+	commitC := make(chan []byte)
+	defer close(commitC)
+	errorC := make(chan error)
+	defer close(errorC)
 
 	node := raft.NewNode(*id,
 		strings.Split(*cluster, ","),
 		*join,
 		snapshotC,
 		proposeC,
+		commitC,
+		errorC,
 		confChangeC)
 
 	logger := &logrus.Logger{}
 	router.NewRouter(context.TODO(),
-		*port, *apiPort, node, proposeC, snapshotC, logger)
+		*port,
+		*apiPort,
+		node,
+		proposeC,
+		snapshotC,
+		commitC,
+		errorC,
+		logger)
 }

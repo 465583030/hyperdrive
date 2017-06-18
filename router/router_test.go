@@ -16,6 +16,8 @@ type testRouterContext struct {
 	context   context.Context
 	proposeC  chan []byte
 	snapshotC chan chan<- []byte
+	commitC   chan []byte
+	errorC    chan error
 }
 
 func newTestRouter(ctx context.Context) (*Router, *testRouterContext) {
@@ -25,18 +27,27 @@ func newTestRouter(ctx context.Context) (*Router, *testRouterContext) {
 
 	logger, hook := null.NewNullLogger()
 
-	testContext := &testRouterContext{
+	tctx := &testRouterContext{
 		logger:    logger,
 		hook:      hook,
 		context:   ctx,
 		proposeC:  make(chan []byte),
 		snapshotC: make(chan chan<- []byte),
+		commitC:   make(chan []byte),
+		errorC:    make(chan error),
 	}
 
-	router := NewRouter(testContext.context,
-		80, 81, nil, testContext.proposeC, testContext.snapshotC, testContext.logger)
+	router := NewRouter(tctx.context,
+		80,
+		81,
+		nil,
+		tctx.proposeC,
+		tctx.snapshotC,
+		tctx.commitC,
+		tctx.errorC,
+		tctx.logger)
 
-	return router, testContext
+	return router, tctx
 }
 
 func TestResponseToSnapshotRequests(t *testing.T) {

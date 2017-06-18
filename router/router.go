@@ -96,14 +96,14 @@ func (r *Router) startAPIService() {
 	}
 }
 
-func (r *Router) readCommits() {
+func (r *Router) readCommits(commitC <-chan []byte, errorC <-chan error) {
 	for {
 		select {
-		case data := <-r.node.Commits():
+		case data := <-commitC:
 			if data != nil {
 				log.Printf(string(data))
 			}
-		case <-r.node.Errors():
+		case <-errorC:
 			break
 		}
 	}
@@ -231,6 +231,8 @@ func NewRouter(ctx context.Context,
 	raftNode *raft.Node,
 	proposeC chan<- []byte,
 	snapshotC <-chan chan<- []byte,
+	commitC <-chan []byte,
+	errorC <-chan error,
 	logger *logrus.Logger) *Router {
 
 	eventLoopsWaitGroup := &sync.WaitGroup{}

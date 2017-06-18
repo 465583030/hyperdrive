@@ -49,10 +49,19 @@ func newCluster(n int) *cluster {
 		os.RemoveAll(fmt.Sprintf("hyperdrive-%d", i+1))
 		os.RemoveAll(fmt.Sprintf("hyperdrive-%d-snap", i+1))
 		clus.proposeC[i] = make(chan []byte, 1)
+		commitC := make(chan []byte)
+		clus.commitC[i] = commitC
+		errorC := make(chan error)
+		clus.errorC[i] = errorC
 		clus.confChangeC[i] = make(chan raftpb.ConfChange, 1)
-		n := NewNode(i+1, clus.peers, false, nil, clus.proposeC[i], clus.confChangeC[i])
-		clus.commitC[i] = n.Commits()
-		clus.errorC[i] = n.Errors()
+		NewNode(i+1,
+			clus.peers,
+			false,
+			nil,
+			clus.proposeC[i],
+			commitC,
+			errorC,
+			clus.confChangeC[i])
 	}
 
 	return clus
