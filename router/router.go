@@ -96,15 +96,36 @@ func (r *Router) startAPIService() {
 	}
 }
 
-func (r *Router) readCommits(commitC <-chan []byte, errorC <-chan error) {
+func (r *Router) committerEventLoop(ctx context.Context,
+	commitC <-chan []byte,
+	errorC <-chan error,
+	routerC chan<- *message) {
+
+	defer r.eventLoopsWaitGroup.Done()
+
 	for {
 		select {
-		case data := <-commitC:
-			if data != nil {
-				log.Printf(string(data))
+		case data, ok := <-commitC:
+			if ok && data != nil {
+				var pMsg routerpb.Message
+				e := pMsg.Unmarshal(data)
+				if e != nil {
+					panic(e)
+				}
+
+				msg := &message{
+					Type:    msgCommit,
+					Message: &pMsg,
+				}
+
+				routerC <- msg
 			}
-		case <-errorC:
-			break
+		case e := <-errorC:
+			r.log.Error("hyperdrive: committerEventLoop stopped.", e)
+			return
+		case <-ctx.Done():
+			r.log.Error("hyperdrive: committerEventLoop stopped.", ctx.Err())
+			return
 		}
 	}
 }
@@ -173,7 +194,7 @@ func (r *Router) routerEventLoop(ctx context.Context,
 		case e := <-input:
 			r.handleMessage(e, proposeC)
 		case <-ctx.Done():
-			r.log.Error("hyperdrive: Router event loop stopped. ", ctx.Err())
+			r.log.Error("hyperdrive: routerEventLoop stopped. ", ctx.Err())
 			done = true
 		}
 	}
@@ -197,7 +218,7 @@ func (r *Router) snapshotterEventLoop(ctx context.Context,
 			routerC <- m
 			s <- (<-resC).([]byte)
 		case <-ctx.Done():
-			r.log.Error("hyperdrive: Snapshotter event loop is stopped. ", ctx.Err())
+			r.log.Error("hyperdrive: snapshotterEventLoop is stopped. ", ctx.Err())
 			done = true
 		}
 	}
@@ -248,14 +269,14 @@ func NewRouter(ctx context.Context,
 	}
 
 	routerWaitGroup.Add(1)
-	eventLoopsWaitGroup.Add(2)
+	eventLoopsWaitGroup.Add(3)
 
 	routerC := make(chan *message)
 
 	go n.routerEventLoop(ctx, routerC, proposeC)
 	go n.snapshotterEventLoop(ctx, routerC, snapshotC)
+	go n.committerEventLoop(ctx, commitC, errorC, routerC)
 	go n.closeRouterC(routerC)
-	// go r.readCommits()
 
 	// TODO: Wait until the node is correctly registered with raft.
 	// go r.startAPIService()
