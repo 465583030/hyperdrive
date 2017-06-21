@@ -56,6 +56,8 @@ type Router struct {
 	log                 *logrus.Logger
 	eventLoopsWaitGroup *sync.WaitGroup
 	routerWaitGroup     *sync.WaitGroup
+	readRouterC         <-chan *message
+	writeRouterC        chan<- *message
 }
 
 func invokeFilter(req *http.Request, filter string) {
@@ -98,8 +100,7 @@ func (r *Router) startAPIService() {
 
 func (r *Router) committerEventLoop(ctx context.Context,
 	commitC <-chan []byte,
-	errorC <-chan error,
-	routerC chan<- *message) {
+	errorC <-chan error) {
 
 	defer r.eventLoopsWaitGroup.Done()
 
@@ -118,7 +119,7 @@ func (r *Router) committerEventLoop(ctx context.Context,
 					Message: &pMsg,
 				}
 
-				routerC <- msg
+				r.writeRouterC <- msg
 			}
 		case e := <-errorC:
 			r.log.Error("hyperdrive: committerEventLoop stopped.", e)
@@ -184,14 +185,13 @@ func (r *Router) handleMessage(msg *message, proposeC chan<- []byte) {
 }
 
 func (r *Router) routerEventLoop(ctx context.Context,
-	input <-chan *message,
 	proposeC chan<- []byte) {
 	defer r.eventLoopsWaitGroup.Done()
 	done := false
 
 	for !done {
 		select {
-		case e := <-input:
+		case e := <-r.readRouterC:
 			r.handleMessage(e, proposeC)
 		case <-ctx.Done():
 			r.log.Error("hyperdrive: routerEventLoop stopped. ", ctx.Err())
@@ -201,7 +201,6 @@ func (r *Router) routerEventLoop(ctx context.Context,
 }
 
 func (r *Router) snapshotterEventLoop(ctx context.Context,
-	routerC chan<- *message,
 	snapshotC <-chan chan<- []byte) {
 
 	defer r.eventLoopsWaitGroup.Done()
@@ -215,7 +214,7 @@ func (r *Router) snapshotterEventLoop(ctx context.Context,
 				Type:    msgSnapshot,
 				ReplyTo: resC,
 			}
-			routerC <- m
+			r.writeRouterC <- m
 			s <- (<-resC).([]byte)
 		case <-ctx.Done():
 			r.log.Error("hyperdrive: snapshotterEventLoop is stopped. ", ctx.Err())
@@ -224,11 +223,11 @@ func (r *Router) snapshotterEventLoop(ctx context.Context,
 	}
 }
 
-func (r *Router) closeRouterC(routerC chan *message) {
+func (r *Router) closeRouterC() {
 	defer r.routerWaitGroup.Done()
 
 	r.eventLoopsWaitGroup.Wait()
-	close(routerC)
+	close(r.writeRouterC)
 	r.log.Error("hyperdrive: Router internal event loop channel closed.")
 }
 
@@ -259,6 +258,8 @@ func NewRouter(ctx context.Context,
 	eventLoopsWaitGroup := &sync.WaitGroup{}
 	routerWaitGroup := &sync.WaitGroup{}
 
+	routerC := make(chan *message)
+
 	n := &Router{
 		port:                port,
 		apiPort:             apiPort,
@@ -266,20 +267,49 @@ func NewRouter(ctx context.Context,
 		log:                 logger,
 		eventLoopsWaitGroup: eventLoopsWaitGroup,
 		routerWaitGroup:     routerWaitGroup,
+		readRouterC:         routerC,
+		writeRouterC:        routerC,
 	}
 
 	routerWaitGroup.Add(1)
 	eventLoopsWaitGroup.Add(3)
 
-	routerC := make(chan *message)
-
-	go n.routerEventLoop(ctx, routerC, proposeC)
-	go n.snapshotterEventLoop(ctx, routerC, snapshotC)
-	go n.committerEventLoop(ctx, commitC, errorC, routerC)
-	go n.closeRouterC(routerC)
+	go n.routerEventLoop(ctx, proposeC)
+	go n.snapshotterEventLoop(ctx, snapshotC)
+	go n.committerEventLoop(ctx, commitC, errorC)
+	go n.closeRouterC()
 
 	// TODO: Wait until the node is correctly registered with raft.
 	// go r.startAPIService()
 	// r.startRouterService()
 	return n
+}
+
+func (r *Router) sendAndWait(msg *message) {
+	replyTo := make(chan interface{})
+	msg.ReplyTo = replyTo
+	r.writeRouterC <- msg
+	<-replyTo
+}
+
+/*
+AddNewRoute adds the suggested route to the table.
+This function blocks until the entry is committed.
+*/
+func (r *Router) AddNewRoute(req *routerpb.AddRouteRequest) {
+	r.sendAndWait(&message{
+		Type:            msgProposeAddRoute,
+		AddRouteRequest: req,
+	})
+}
+
+/*
+RemoveRoute removes the suggested route from the table.
+This function blocks until the entry is committed.
+*/
+func (r *Router) RemoveRoute(req *routerpb.RemoveRouteRequest) {
+	r.sendAndWait(&message{
+		Type:               msgProposeRemoveRoute,
+		RemoveRouteRequest: req,
+	})
 }
