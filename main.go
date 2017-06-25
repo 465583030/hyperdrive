@@ -30,6 +30,7 @@ func main() {
 	errorC := make(chan error)
 	defer close(errorC)
 
+	rt := router.NewMapRouteTable()
 	node := raft.NewNode(*id,
 		strings.Split(*cluster, ","),
 		*join,
@@ -48,5 +49,6 @@ func main() {
 		snapshotC,
 		commitC,
 		errorC,
+		rt,
 		logger)
 }

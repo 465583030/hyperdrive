@@ -5,19 +5,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hyperdrive/router/routerpb"
 	"github.com/sirupsen/logrus"
 	"github.com/sirupsen/logrus/hooks/null"
 	"github.com/stretchr/testify/assert"
 )
 
 type testRouterContext struct {
-	logger    *logrus.Logger
-	hook      *null.Hook
-	context   context.Context
-	proposeC  chan []byte
-	snapshotC chan chan<- []byte
-	commitC   chan []byte
-	errorC    chan error
+	logger     *logrus.Logger
+	hook       *null.Hook
+	context    context.Context
+	proposeC   chan []byte
+	snapshotC  chan chan<- []byte
+	commitC    chan []byte
+	errorC     chan error
+	routeTable RouteTable
 }
 
 func newTestRouter(ctx context.Context) (*Router, *testRouterContext) {
@@ -28,13 +30,14 @@ func newTestRouter(ctx context.Context) (*Router, *testRouterContext) {
 	logger, hook := null.NewNullLogger()
 
 	tctx := &testRouterContext{
-		logger:    logger,
-		hook:      hook,
-		context:   ctx,
-		proposeC:  make(chan []byte),
-		snapshotC: make(chan chan<- []byte),
-		commitC:   make(chan []byte),
-		errorC:    make(chan error),
+		logger:     logger,
+		hook:       hook,
+		context:    ctx,
+		proposeC:   make(chan []byte),
+		snapshotC:  make(chan chan<- []byte),
+		commitC:    make(chan []byte),
+		errorC:     make(chan error),
+		routeTable: NewMapRouteTable(),
 	}
 
 	router := NewRouter(tctx.context,
@@ -45,6 +48,7 @@ func newTestRouter(ctx context.Context) (*Router, *testRouterContext) {
 		tctx.snapshotC,
 		tctx.commitC,
 		tctx.errorC,
+		tctx.routeTable,
 		tctx.logger)
 
 	return router, tctx
@@ -81,4 +85,50 @@ func TestLoggingWhenExitingEventLoop(t *testing.T) {
 	for _, e := range tc.hook.Entries {
 		assert.Equal(t, logrus.ErrorLevel, e.Level)
 	}
+}
+
+func TestAddNewRoute(t *testing.T) {
+	path := "a"
+	route := "b"
+
+	r := &routerpb.AddRouteRequest{
+		Path:  &path,
+		Route: &route,
+	}
+
+	n, tc := newTestRouter(nil)
+	d := n.AddNewRoute(r)
+
+	p := <-tc.proposeC
+	tc.commitC <- p
+
+	<-d
+
+	sr, ok := tc.routeTable.Resolve("a")
+	assert.True(t, ok)
+	assert.Equal(t, "b", sr.Destination)
+}
+
+func TestRemoveRoute(t *testing.T) {
+	path := "a"
+	route := "b"
+
+	n, tc := newTestRouter(nil)
+	d := n.AddNewRoute(&routerpb.AddRouteRequest{
+		Path:  &path,
+		Route: &route,
+	})
+
+	tc.commitC <- <-tc.proposeC
+	<-d
+
+	d = n.RemoveRoute(&routerpb.RemoveRouteRequest{
+		Path: &path,
+	})
+
+	tc.commitC <- <-tc.proposeC
+	<-d
+
+	_, ok := tc.routeTable.Resolve("a")
+	assert.False(t, ok)
 }

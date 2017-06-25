@@ -131,9 +131,10 @@ func (r *Router) committerEventLoop(ctx context.Context,
 	}
 }
 
-func (r *Router) handleMessage(msg *message, proposeC chan<- []byte) {
-	pending := map[string]*message{}
+func (r *Router) handleMessage(pPending *map[string]*message,
+	msg *message, proposeC chan<- []byte) {
 	var msgID uint64
+	pending := *pPending
 
 	switch msg.Type {
 	case msgProposeAddRoute, msgProposeRemoveRoute:
@@ -170,13 +171,17 @@ func (r *Router) handleMessage(msg *message, proposeC chan<- []byte) {
 				InputFilters:  pmsg.AddRoute.Preprocessors,
 				OutputFilters: pmsg.AddRoute.Postprocessors,
 			})
+		case routerpb.MsgRemoveRoute:
+			r.routeTable.Delete(*pmsg.RemoveRoute.Path)
 		}
+
 		// delete the item from map if it was proposed by this node.
 		// also notify the waiters.
 		if input, ok := pending[pmsg.ProposalID]; ok {
 			r.log.Debugf("hyperdrive: Proposal %s is committed", pmsg.ProposalID)
 			delete(pending, pmsg.ProposalID)
 			input.ReplyTo <- true
+			close(input.ReplyTo)
 		}
 
 	case msgSnapshot:
@@ -188,11 +193,12 @@ func (r *Router) routerEventLoop(ctx context.Context,
 	proposeC chan<- []byte) {
 	defer r.eventLoopsWaitGroup.Done()
 	done := false
+	pending := map[string]*message{}
 
 	for !done {
 		select {
 		case e := <-r.readRouterC:
-			r.handleMessage(e, proposeC)
+			r.handleMessage(&pending, e, proposeC)
 		case <-ctx.Done():
 			r.log.Error("hyperdrive: routerEventLoop stopped. ", ctx.Err())
 			done = true
@@ -253,6 +259,7 @@ func NewRouter(ctx context.Context,
 	snapshotC <-chan chan<- []byte,
 	commitC <-chan []byte,
 	errorC <-chan error,
+	routeTable RouteTable,
 	logger *logrus.Logger) *Router {
 
 	eventLoopsWaitGroup := &sync.WaitGroup{}
@@ -269,6 +276,7 @@ func NewRouter(ctx context.Context,
 		routerWaitGroup:     routerWaitGroup,
 		readRouterC:         routerC,
 		writeRouterC:        routerC,
+		routeTable:          routeTable,
 	}
 
 	routerWaitGroup.Add(1)
@@ -285,19 +293,23 @@ func NewRouter(ctx context.Context,
 	return n
 }
 
-func (r *Router) sendAndWait(msg *message) {
-	replyTo := make(chan interface{})
+func (r *Router) sendCore(msg *message) <-chan interface{} {
+	replyTo := make(chan interface{}, 1)
 	msg.ReplyTo = replyTo
 	r.writeRouterC <- msg
-	<-replyTo
+	return replyTo
 }
 
 /*
 AddNewRoute adds the suggested route to the table.
-This function blocks until the entry is committed.
+This function returns before the route is committed.
+
+Use the returned channel to determine if the route was
+successfully added or not.
 */
-func (r *Router) AddNewRoute(req *routerpb.AddRouteRequest) {
-	r.sendAndWait(&message{
+func (r *Router) AddNewRoute(
+	req *routerpb.AddRouteRequest) <-chan interface{} {
+	return r.sendCore(&message{
 		Type:            msgProposeAddRoute,
 		AddRouteRequest: req,
 	})
@@ -305,10 +317,14 @@ func (r *Router) AddNewRoute(req *routerpb.AddRouteRequest) {
 
 /*
 RemoveRoute removes the suggested route from the table.
-This function blocks until the entry is committed.
+This function returns before the route is committed.
+
+Use the returned channel to determine if the route was
+successfully removed or not.
 */
-func (r *Router) RemoveRoute(req *routerpb.RemoveRouteRequest) {
-	r.sendAndWait(&message{
+func (r *Router) RemoveRoute(
+	req *routerpb.RemoveRouteRequest) <-chan interface{} {
+	return r.sendCore(&message{
 		Type:               msgProposeRemoveRoute,
 		RemoveRouteRequest: req,
 	})
